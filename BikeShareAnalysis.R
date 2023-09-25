@@ -123,3 +123,45 @@ pen_predictions2 <- predict(pen_workflow2, test) %>%
   mutate(datetime=as.character(format(datetime)))
 
 write.csv(pen_predictions2, file = "new/stat 348/KaggleBikeShare/pen_submission2.csv", row.names = F)
+
+
+# Fit Cross-Validated Penalized Regression
+pencv_model <- linear_reg(penalty=tune(), 
+                          mixture=tune()) %>%
+  set_engine("glmnet")
+
+pencv_workflow <- workflow() %>%
+  add_recipe(pen_recipe) %>%
+  add_model(pencv_model)
+
+tuning_grid <- grid_regular(penalty(),
+                            mixture(),
+                            levels = 5)
+
+folds <- vfold_cv(logtrain, v = 5, repeats = 1)
+
+cv_results <- pencv_workflow %>%
+  tune_grid(resamples = folds,
+            grid = tuning_grid)
+
+collect_metrics(cv_results) %>%
+  filter(.metric == "rmse") %>%
+  ggplot(data = ., aes(x = penalty, y = mean, color = factor(mixture))) +
+  geom_line()
+
+besttune <- cv_results %>%
+  select_best("rmse")
+
+final_workflow <- pencv_workflow %>%
+  finalize_workflow(besttune) %>%
+  fit(data = logtrain)
+
+pencv_predictions <- final_workflow %>%
+  predict(new_data = test)
+
+pencv_submission <- data.frame(test$datetime,
+                               exp(pencv_predictions))
+
+colnames(pencv_submission) <- c("datetime", "count")
+
+write.csv(pencv_submission, file = "new/stat 348/KaggleBikeShare/pencv_submission.csv", row.names = F)
