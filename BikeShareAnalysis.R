@@ -3,6 +3,7 @@ library(lubridate)
 library(tidymodels)
 library(poissonreg)
 library(glmnet)
+library(rpart)
 
 # Set working directory
 setwd("C:/Users/davis/OneDrive - Brigham Young University/Documents/skool")
@@ -165,3 +166,41 @@ pencv_submission <- data.frame(test$datetime,
 colnames(pencv_submission) <- c("datetime", "count")
 
 write.csv(pencv_submission, file = "new/stat 348/KaggleBikeShare/pencv_submission.csv", row.names = F)
+
+
+# Fit Regression Tree
+tree_model <- decision_tree(tree_depth = tune(),
+                            cost_complexity = tune(),
+                            min_n = tune()) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+tree_workflow <- workflow() %>%
+  add_recipe(pen_recipe) %>%
+  add_model(tree_model)
+
+tuning_grid <- grid_regular(tree_depth(),
+                            cost_complexity(),
+                            min_n(),
+                            levels = 5)
+
+tree_results <- tree_workflow %>%
+  tune_grid(resamples = folds,
+            grid = tuning_grid)
+
+best_tree_tune <- tree_results %>%
+  select_best("rmse")
+
+final_tree_workflow <- tree_workflow %>%
+  finalize_workflow(best_tree_tune) %>%
+  fit(data = logtrain)
+
+tree_predictions <- final_tree_workflow %>%
+  predict(new_data = test)
+
+tree_submission <- data.frame(test$datetime,
+                              exp(tree_predictions))
+
+colnames(tree_submission) <- c("datetime", "count")
+
+write.csv(tree_submission, file = "new/stat 348/KaggleBikeShare/tree_submission.csv", row.names = F)
