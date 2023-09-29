@@ -4,6 +4,7 @@ library(tidymodels)
 library(poissonreg)
 library(glmnet)
 library(rpart)
+library(ranger)
 
 # Set working directory
 setwd("C:/Users/davis/OneDrive - Brigham Young University/Documents/skool")
@@ -204,3 +205,40 @@ tree_submission <- data.frame(test$datetime,
 colnames(tree_submission) <- c("datetime", "count")
 
 write.csv(tree_submission, file = "new/stat 348/KaggleBikeShare/tree_submission.csv", row.names = F)
+
+
+# Fit Random Forest
+forest_model <- rand_forest(mtry = tune(),
+                            min_n = tune(),
+                            trees = 500) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+forest_workflow <- workflow() %>%
+  add_recipe(pen_recipe) %>%
+  add_model(forest_model)
+
+tuning_grid <- grid_regular(mtry(range = c(1, 10)),
+                            min_n(),
+                            levels = 5)
+
+forest_results <- forest_workflow %>%
+  tune_grid(resamples = folds,
+            grid = tuning_grid)
+
+best_forest_tune <- forest_results %>%
+  select_best("rmse")
+
+final_forest_workflow <- forest_workflow %>%
+  finalize_workflow(best_forest_tune) %>%
+  fit(data = logtrain)
+
+forest_predictions <- final_forest_workflow %>%
+  predict(new_data = test)
+
+forest_submission <- data.frame(test$datetime,
+                                exp(forest_predictions))
+
+colnames(forest_submission) <- c("datetime", "count")
+
+write.csv(forest_submission, file = "new/stat 348/KaggleBikeShare/forest_submission.csv", row.names = F)
