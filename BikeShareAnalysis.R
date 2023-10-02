@@ -5,6 +5,7 @@ library(poissonreg)
 library(glmnet)
 library(rpart)
 library(ranger)
+library(stacks)
 
 # Set working directory
 setwd("C:/Users/davis/OneDrive - Brigham Young University/Documents/skool")
@@ -242,3 +243,72 @@ forest_submission <- data.frame(test$datetime,
 colnames(forest_submission) <- c("datetime", "count")
 
 write.csv(forest_submission, file = "new/stat 348/KaggleBikeShare/forest_submission.csv", row.names = F)
+
+
+# Fit Stacked Model
+
+
+folds <- vfold_cv(logtrain, v = 5)
+
+untunedmodel <- control_stack_grid()
+tunedmodel <- control_stack_resamples()
+
+pen_model <- linear_reg(penalty=tune(), mixture=tune()) %>%
+  set_engine("glmnet")
+
+pen_wf <- workflow() %>%
+  add_recipe(pen_recipe) %>%
+  add_model(pen_model)
+
+pen_tuning_grid <- grid_regular(penalty(),
+                                mixture(),
+                                levels = 5)
+
+pen_models <- pen_wf %>%
+  tune_grid(resamples = folds,
+            grid = pen_tuning_grid,
+            metrics = metric_set(rmse, mae, rsq),
+            control = untunedmodel)
+
+lin_reg <- linear_reg() %>%
+  set_engine("lm")
+
+lin_reg_wf <- workflow() %>%
+  add_model(lin_reg) %>%
+  add_recipe(pen_recipe)
+
+lin_reg_model <- 
+  fit_resamples(lin_reg_wf,
+                resamples = folds,
+                metrics = metric_set(rmse),
+                control = tunedmodel)
+
+tree_tuning_grid <- tuning_grid <- grid_regular(tree_depth(),
+                                                cost_complexity(),
+                                                min_n(),
+                                                levels = 5)
+
+tree_models <- tree_workflow %>%
+  tune_grid(resamples = folds,
+            grid = tree_tuning_grid,
+            metrics = metric_set(rmse),
+            control = untunedmodel)
+
+my_stack <- stacks() %>%
+  add_candidates(lin_reg_model) %>%
+  add_candidates(pen_models) %>%
+  add_candidates(tree_models)
+
+stack_mod <- my_stack %>%
+  blend_predictions() %>%
+  fit_members()
+
+stack_predictions <- stack_mod %>%
+  predict(test)
+
+stack_submission <- data.frame(datetime = test$datetime,
+                               count = exp(stack_predictions))
+
+colnames(stack_submission) <- c("datetime", "count")
+
+write.csv(stack_submission, file = "new/stat 348/KaggleBikeShare/stack_submission.csv", row.names = F)
